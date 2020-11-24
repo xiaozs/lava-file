@@ -1,0 +1,38 @@
+{
+  "name": "lava-file",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "typings": "dist/index.d.ts",
+  "scripts": {
+    "prepublish": "npm run build",
+    "build": "webpack"
+  },
+  "keywords": [],
+  "author": "xiaozs",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/webpack": "^4.41.22",
+    "clean-webpack-plugin": "^3.0.0",
+    "ts-loader": "^8.0.3",
+    "ts-node": "^9.0.0",
+    "tslib": "^2.0.1",
+    "typescript": "^4.0.2",
+    "webpack": "^4.44.1",
+    "webpack-cli": "^3.3.12"
+  },
+  "dependencies": {
+    "@types/node": "^13.9.2"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaozs/lava-file.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaozs/lava-file/issues"
+  },
+  "homepage": "https://github.com/xiaozs/lava-file#readme"
+}
