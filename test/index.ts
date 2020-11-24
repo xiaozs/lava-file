@@ -6,12 +6,9 @@ function wait(ms: number) {
 
 async function main() {
     let src = await FileSystem.getDirectory("./src");
-    await src.open(async (dir) => {
-        for await (let file of dir.getFileIterator()) {
-            let res = await file.read("utf-8");
-        }
-        await wait(1000);
-    })
+    let res = await src.read();
+    console.log(res);
+    debugger;
 }
 
 main();
