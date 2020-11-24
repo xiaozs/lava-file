@@ -1,5 +1,5 @@
-import { PathLike, promises, MakeDirectoryOptions, Dirent, OpenDirOptions, Dir, constants, RmDirOptions } from 'fs';
-import { resolve } from 'path';
+import { promises, MakeDirectoryOptions, Dirent, OpenDirOptions, Dir, constants, RmDirOptions, createReadStream, ReadStream, createWriteStream, WriteStream } from 'fs';
+import { basename, dirname, extname, normalize, relative, resolve, sep } from 'path';
 import { FileItemHandle, WriteOption } from './FileItemHandle';
 import { ItemType } from './ItemType';
 
@@ -14,14 +14,72 @@ export class TypeNotMatchError extends Error {
 }
 
 /**
+ * 名称有误
+ */
+export class NotNameError extends Error {
+    constructor() {
+        super("名称有误");
+        Object.setPrototypeOf(this, this.constructor.prototype);
+    }
+}
+
+/**
+ * 不能复制、移动文件夹到该文件夹下
+ */
+export class CirculateError extends Error {
+    constructor() {
+        super("不能复制、移动文件夹到该文件夹下");
+        Object.setPrototypeOf(this, this.constructor.prototype);
+    }
+}
+
+/**
  * 文件系统
  */
 export class FileSystem {
     /**
+     * 新增读取流
+     * @param path 路径
+     * @param options 流选项
+     */
+    static createReadStream(path: string, options?: string | {
+        flags?: string;
+        encoding?: string;
+        fd?: number;
+        mode?: number;
+        autoClose?: boolean;
+        /**
+         * @default false
+         */
+        emitClose?: boolean;
+        start?: number;
+        end?: number;
+        highWaterMark?: number;
+    }): ReadStream {
+        return createReadStream(path, options);
+    }
+    /**
+     * 新增写入流
+     * @param path 路径
+     * @param options 流选项
+     */
+    static createWriteStream(path: string, options?: string | {
+        flags?: string;
+        encoding?: string;
+        fd?: number;
+        mode?: number;
+        autoClose?: boolean;
+        emitClose?: boolean;
+        start?: number;
+        highWaterMark?: number;
+    }): WriteStream {
+        return createWriteStream(path, options);
+    }
+    /**
      * 从已有的文件系统项目中创建对象
      * @param path 路径
      */
-    static async getItem(path: PathLike): Promise<FileSystemItem> {
+    static async getItem(path: string): Promise<FileSystemItem> {
         let s = await promises.lstat(path);
         return getItem(s.mode & constants.S_IFMT, path);
     }
@@ -30,7 +88,7 @@ export class FileSystem {
      * @throws 路径不为文件夹时，抛出`TypeNotMatchError`
      * @param path 路径
      */
-    static async getDirectory(path: PathLike): Promise<Directory> {
+    static async getDirectory(path: string): Promise<Directory> {
         let item = await this.getItem(path);
         if (!item.isDirectory()) throw new TypeNotMatchError();
         return item;
@@ -40,7 +98,7 @@ export class FileSystem {
      * @throws 路径不为文件夹时，抛出`TypeNotMatchError`
      * @param path 路径
      */
-    static async getFile(path: PathLike): Promise<File> {
+    static async getFile(path: string): Promise<File> {
         let item = await this.getItem(path);
         if (!item.isFile()) throw new TypeNotMatchError();
         return item;
@@ -50,7 +108,7 @@ export class FileSystem {
      * @param path 路径
      * @param options 新增选项
      */
-    static async createDirectory(path: PathLike, options?: number | string | MakeDirectoryOptions | null) {
+    static async createDirectory(path: string, options?: number | string | MakeDirectoryOptions | null) {
         await promises.mkdir(path, options);
         return new Directory(path);
     }
@@ -60,7 +118,7 @@ export class FileSystem {
      * @param data 初始数据
      * @param options 新增选项
      */
-    static async createFile(path: PathLike, data: any, options?: { encoding?: string | null; mode?: string | number; flag?: string | number; } | string | null) {
+    static async createFile(path: string, data: any, options?: { encoding?: string | null; mode?: string | number; flag?: string | number; } | string | null) {
         await promises.writeFile(path, data, options);
         return new File(path);
     }
@@ -80,9 +138,9 @@ export class FileSystem {
      * @param path 路径
      * @param options 选项
      */
-    static realPath(path: PathLike, options?: { encoding?: BufferEncoding | null; } | BufferEncoding | null): Promise<string>;
-    static realPath(path: PathLike, options: { encoding: "buffer"; } | "buffer"): Promise<Buffer>;
-    static realPath(path: PathLike, options?: { encoding?: string | null; } | string | null): Promise<string | Buffer>;
+    static realPath(path: string, options?: { encoding?: BufferEncoding | null; } | BufferEncoding | null): Promise<string>;
+    static realPath(path: string, options: { encoding: "buffer"; } | "buffer"): Promise<Buffer>;
+    static realPath(path: string, options?: { encoding?: string | null; } | string | null): Promise<string | Buffer>;
     static realPath(...args: any[]): any {
         return promises.realpath(...args as [any]);
     }
@@ -92,6 +150,50 @@ export class FileSystem {
  * 文件系统对象
  */
 export abstract class FileSystemItem {
+    abstract copy(dest: string, baseCwd?: boolean): Promise<this>;
+    /**
+     * 改变文件的名称
+     * @param newName 新名称
+     */
+    async rename(newName: string) {
+        let notName = normalize(newName).includes(sep);
+        if (notName) throw new NotNameError();
+        let dir = dirname(this.path);
+        newName = resolve(dir, newName);
+
+        await promises.rename(this.path, newName);
+        this.setPath(newName);
+    }
+    /**
+     * 获取当前文件夹
+     */
+    getCurrentDirectory(): Directory {
+        if (this.isDirectory()) {
+            return this;
+        } else {
+            return this.getParent()!;
+        }
+    }
+    /**
+     * 名称
+     */
+    get name() {
+        return basename(this.path);
+    }
+    /**
+     * 扩展名
+     */
+    get extname() {
+        return extname(this.path);
+    }
+    /**
+     * 获取父文件夹对象
+     */
+    getParent(): Directory | null {
+        let dirPath = dirname(this.path);
+        if (this.path === dirPath) return null;
+        return new Directory(dirPath);
+    }
     /**
      * 文件系统对象类型
      */
@@ -99,7 +201,7 @@ export abstract class FileSystemItem {
     /**
      * 路径
      */
-    private _path: PathLike;
+    private _path: string;
     /**
      * 路径
      */
@@ -110,13 +212,13 @@ export abstract class FileSystemItem {
      * 设置路径
      * @param path 路径
      */
-    protected setPath(path: PathLike) {
+    protected setPath(path: string) {
         this._path = path;
     }
     /**
      * @param path 路径
      */
-    constructor(path: PathLike) {
+    constructor(path: string) {
         if (typeof path === "string") {
             path = resolve(process.cwd(), path);
         }
@@ -174,27 +276,35 @@ export abstract class FileSystemItem {
     /**
      * 在目标路径新建一个硬链接
      * @param path 目标路径
+     * @param baseCwd path是否以`process.cwd()`为基，默认为`false`
      */
-    async createLink(path: PathLike) {
-        // todo，路径是相对与cwd的，有点怪
+    async createLink(path: string, baseCwd = false) {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            path = resolve(dir, path);
+        }
         await promises.link(this.path, path);
-        return new (this.constructor as new (path: PathLike) => FileSystemItem)(path);
+        return new (this.constructor as new (path: string) => FileSystemItem)(path);
     }
     /**
      * 在目标路径新建一个硬符号
      * @param path 目标路径
+     * @param baseCwd path是否以`process.cwd()`为基，默认为`false`
      */
-    async createSymbolicLink(path: PathLike) {
-        // todo，路径是相对与cwd的，有点怪
+    async createSymbolicLink(path: string, baseCwd = false) {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            path = resolve(dir, path);
+        }
         await promises.symlink(this.path, path);
         return new SymbolicLink(path);
     }
     /**
      * 更改权限
-     * @param mode 权限模式，
+     * @param mode 权限模式
      */
     changeMode(mode: string | number) {
-        // todo
+        // todo, 这个接口太难用了
         return promises.chmod(this.path, mode);
     }
     /**
@@ -227,6 +337,13 @@ export abstract class FileSystemItem {
  */
 export abstract class FileLikeItem extends FileSystemItem {
     /**
+     * 获取文件大小
+     */
+    async getSize() {
+        let s = await this.getStatus();
+        return s.size;
+    }
+    /**
      * 删除文件
      */
     unlink() {
@@ -253,9 +370,15 @@ export abstract class FileLikeItem extends FileSystemItem {
     /**
      * 复制文件到目标路径
      * @param dest 目标路径
+     * @param baseCwd path是否以`process.cwd()`为基，默认为`false`
      */
-    copy(dest: PathLike) {
-        return promises.copyFile(this.path, dest);
+    async copy(dest: string, baseCwd = false): Promise<this> {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            dest = resolve(dir, dest);
+        }
+        await promises.copyFile(this.path, dest);
+        return await FileSystem.getItem(dest) as this;
     }
 
     /**
@@ -279,17 +402,15 @@ export abstract class FileLikeItem extends FileSystemItem {
     /**
      * 改变文件的路径或名称
      * @param newPath 新路径或名称
+     * @param baseCwd path是否以`process.cwd()`为基，默认为`false`
      */
-    async rename(newPath: PathLike) {
+    async moveTo(newPath: string, baseCwd = false) {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            newPath = resolve(dir, newPath);
+        }
         await promises.rename(this.path, newPath);
         this.setPath(newPath);
-    }
-    /**
-     * 改变文件的路径或名称
-     * @param newPath 新路径或名称
-     */
-    moveTo(newPath: PathLike) {
-        return this.rename(newPath);
     }
     /**
      * 将文件截断为特定长度
@@ -334,6 +455,91 @@ export class CharacterDevice extends FileLikeItem {
  * 文件夹
  */
 export class Directory extends FileSystemItem {
+    /**
+     * 改变文件夹的路径或名称
+     * @param newPath 新路径或名称
+     */
+    async moveTo(newPath: string, baseCwd = false) {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            newPath = resolve(dir, newPath);
+        } else {
+            newPath = resolve(process.cwd(), newPath);
+        }
+
+        let isSub = this.isSub(this.path, newPath);
+        if (isSub) throw new CirculateError();
+
+        await promises.rename(this.path, newPath);
+        this.setPath(newPath);
+    }
+
+    /**
+     * 复制文件夹到目标路径
+     * @param dest 目标路径
+     * @param baseCwd path是否以`process.cwd()`为基，默认为`false`
+     */
+    async copy(dest: string, baseCwd = false): Promise<this> {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            dest = resolve(dir, dest);
+        } else {
+            dest = resolve(process.cwd(), dest);
+        }
+
+        let isSub = this.isSub(this.path, dest);
+        if (isSub) throw new CirculateError();
+
+        let destDir = await FileSystem.createDirectory(dest) as this;
+
+        await this.open(async (dir) => {
+            for await (let it of dir) {
+                let relativePath = relative(this.path, it.path);
+                let newPath = resolve(destDir.path, relativePath);
+                await it.copy(newPath);
+            }
+        });
+
+        return destDir;
+    }
+
+    private isSub(parentPath: string, subPath: string): boolean {
+        let pArr = parentPath.split(sep);
+        let sArr = subPath.split(sep);
+        if (sArr.length < pArr.length) return false;
+
+        for (let i = 0; i < pArr.length; i++) {
+            let p = pArr[i];
+            let s = sArr[i];
+            if (p !== s) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * 新增子文件
+     * @param path 相对文件夹的路径
+     * @param data 初始数据
+     * @param options 新增选项
+     */
+    async createSubFile(path: string, data: any, options?: { encoding?: string | null; mode?: string | number; flag?: string | number; } | string | null) {
+        path = resolve(this.path, path);
+        let dirPath = dirname(path);
+        await FileSystem.createDirectory(dirPath, { recursive: true, mode: (options as any)?.mode });
+        return FileSystem.createFile(path, data, options);
+    }
+
+    /**
+     * 新增子文件夹
+     * @param path 相对文件夹的路径
+     * @param options 新增选项
+     */
+    createSubDirectory(path: string, options?: number | string | MakeDirectoryOptions | null): Promise<Directory> {
+        path = resolve(this.path, path);
+        return FileSystem.createDirectory(path, options);
+    }
+
     readonly type = ItemType.Directory;
     /**
      * 删除文件夹
@@ -345,13 +551,28 @@ export class Directory extends FileSystemItem {
 
     /**
      * 获取子项目对象
-     * @param options 读取选项
+     * @param type 对象类型，默认返回所有
      */
-    async read(): Promise<FileSystemItem[]> {
+    async getChildren(type?: ItemType): Promise<FileSystemItem[]> {
         let res = await promises.readdir(this.path, { withFileTypes: true });
         let paths = res.map(it => resolve(this.path.toString(), it.name));
         let pArr = paths.map(it => FileSystem.getItem(it));
-        return await Promise.all(pArr);
+        let items = await Promise.all(pArr);
+        return type ? items.filter(it => it.type === type) : items;
+    }
+
+    /**
+     * 获取子文件
+     */
+    getSubFile() {
+        return this.getChildren(ItemType.File);
+    }
+
+    /**
+     * 获取子文件夹
+     */
+    getSubDirectory() {
+        return this.getChildren(ItemType.Directory);
     }
 
     /**
@@ -402,6 +623,31 @@ export class Socket extends FileLikeItem {
 export class SymbolicLink extends FileSystemItem {
     readonly type = ItemType.SymbolicLink;
     /**
+     * 改变文件的路径或名称
+     * @param newPath 新路径或名称
+     * @param baseCwd path是否以`process.cwd()`为基，默认为`false`
+     */
+    moveTo(newPath: string, baseCwd = false) {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            newPath = resolve(dir, newPath);
+        }
+        return this.rename(newPath);
+    }
+    /**
+     * 复制符号链接到目标路径
+     * @param dest 目标路径
+     * @param baseCwd path是否以`process.cwd()`为基，默认为`false`
+     */
+    async copy(dest: string, baseCwd = false) {
+        if (!baseCwd) {
+            let dir = dirname(this.path)
+            dest = resolve(dir, dest);
+        }
+        let item = await this.getItem();
+        return await item.createSymbolicLink(dest) as this;
+    }
+    /**
      * 获取**符号链接自身**的状态
      */
     getStatus() {
@@ -437,6 +683,7 @@ export class SymbolicLink extends FileSystemItem {
      */
     async getItem() {
         let path = await this.readLink();
+        path = resolve(this.path, path);
         return await FileSystem.getItem(path);
     }
 }
@@ -546,7 +793,7 @@ export class DirectoryItemHandle {
  * @param type 类型
  * @param path 路径
  */
-function getItem(type: ItemType, path: PathLike): FileSystemItem {
+function getItem(type: ItemType, path: string): FileSystemItem {
     switch (type) {
         case ItemType.BlockDevice: return new BlockDevice(path);
         case ItemType.CharacterDevice: return new CharacterDevice(path);
